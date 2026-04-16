@@ -6400,7 +6400,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                 ${selectCell}
                 <td role="cell">${product.name}</td>
                 <td role="cell"><div><input type="text" class="description-input" data-field="description" value="${product.description}" aria-label="Description" title="Enter product description" ${readonlyAttr}></div></td>
-                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" ${isDeductiveQuote ? '' : 'min="0"'} value="${product.quantity}" aria-label="Quantity" title="Number of subscription units" ${readonlyAttr}></div></td>
+                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" ${isDeductiveQuote ? '' : 'min="0"'} step="1" value="${product.quantity}" aria-label="Quantity" title="Number of subscription units (whole numbers)" ${readonlyAttr}></div></td>
                 ${isDeductiveQuote ? `<td role="cell"><div>${(product.originalQuantity !== undefined && product.originalQuantity !== null) ? product.originalQuantity : product.quantity}</div></td>` : ''}
                 <td role="cell"><div><input type="text" class="total-subscription-input" data-field="totalSubscription" value="${formatNumber(product.totalSubscription)}" aria-label="Total Subscription" title="Total subscription amount" ${readonlyAttr}></div></td>
                 <td role="cell"><div class="total-monthly">$${totalMonthly}</div></td>
@@ -6439,7 +6439,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                 ${selectCell}
                 <td role="cell"><div><input type="text" class="name-input" data-field="name" value="${product.name}" aria-label="Name" title="Enter item name" ${readonlyAttr}></div></td>
                 <td role="cell"><div><input type="text" class="description-input" data-field="description" value="${product.description}" aria-label="Description" title="Enter item description" ${readonlyAttr}></div></td>
-                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" ${isDeductiveQuote ? '' : 'min="0"'} value="${product.quantity}" aria-label="Quantity" title="Number of units" ${readonlyAttr}></div></td>
+                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" ${isDeductiveQuote ? '' : 'min="0"'} step="1" value="${product.quantity}" aria-label="Quantity" title="Number of units (whole numbers)" ${readonlyAttr}></div></td>
                 ${isDeductiveQuote ? `<td role="cell"><div>${(product.originalQuantity !== undefined && product.originalQuantity !== null) ? product.originalQuantity : product.quantity}</div></td>` : ''}
                 <td role="cell"><div><input type="text" class="sell-input" data-field="sell" value="${formatNumber(product.sellPrice)}" aria-label="Unit Sell" title="Unit selling price" ${readonlyAttr}></div></td>
                 <td role="cell"><div><input type="text" class="cost-input" data-field="cost" value="${formatNumber(product.costPrice)}" aria-label="Unit Cost" title="Unit cost price" ${readonlyAttr}></div></td>
@@ -6476,6 +6476,10 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
             setTooltip(row.querySelector('.ext-cost'), `$${extCost}`);
         } else if (productType == 826080004) {
             const isTaxable = product.msdyn_taxable == true;
+            // Price Per Unit = Ext Sell / Quantity = sellPrice × (toTest/100) × annual × time
+            const tiMultiplierNoQty = ((product.toTest || 100) / 100) * (product.annual || 1) * (product.time || 0);
+            const pricePerUnit = tiMultiplierNoQty * product.sellPrice;
+            const costPerUnit = tiMultiplierNoQty * product.costPrice;
             const selectCell = showSelect ? `<td role="cell"><input type="checkbox" aria-label="Select test item" title="Select this test item" ${disabledAttr}></td>` : '';
             const editCell = showEdit ? `<td role="cell"><button class="edit-mini" onclick="editProductInCart('${productType}', '${groupId}', ${idx})" aria-label="Edit ${product.name}">Edit</button></td>` : '';
             row.innerHTML = `
@@ -6487,8 +6491,8 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                 ${isDeductiveQuote ? `<td role="cell"><div>${(product.originalQuantity !== undefined && product.originalQuantity !== null) ? product.originalQuantity : product.quantity}</div></td>` : ''}
                 <td role="cell"><div><input type="number" class="annual-input" data-field="annual" min="0" value="${product.annual || 1}" aria-label="Annual" title="Annual frequency (e.g., 1 for yearly)" ${readonlyAttr}></div></td>
                 <td role="cell"><div><input type="number" class="totest-input" data-field="totest" min="0" max="100" value="${product.toTest || 100}" aria-label="% to Test" title="Percentage of items to test (0-100)" ${readonlyAttr}></div></td>
-                <td role="cell"><div><input type="text" class="sell-input" data-field="sell" value="${formatNumber(product.sellPrice)}" aria-label="Unit Sell" title="Unit selling price for testing" ${readonlyAttr}></div></td>
-                <td role="cell"><div><input type="text" class="cost-input" data-field="cost" value="${formatNumber(product.costPrice)}" aria-label="Unit Cost" title="Unit cost for testing" ${readonlyAttr}></div></td>
+                <td role="cell"><div><input type="text" class="sell-input" data-field="sell" value="${formatNumber(pricePerUnit)}" aria-label="Price Per Unit" title="Price Per Unit (Ext Sell ÷ Quantity)" ${readonlyAttr}></div></td>
+                <td role="cell"><div><input type="text" class="cost-input" data-field="cost" value="${formatNumber(costPerUnit)}" aria-label="Cost Per Unit" title="Cost Per Unit (Ext Cost ÷ Quantity)" ${readonlyAttr}></div></td>
                 <td role="cell"><div class="ext-sell">$${extSell}</div></td>
                 <td role="cell"><div class="ext-cost">$${extCost}</div></td>
                 <td role="cell"><div><input type="number" class="gpm-input" data-field="gpm" step="0.01" max="99.99" value="${formatGPM(gpm)}" aria-label="GPM" title="Gross Profit Margin percentage (0-99.99)" ${readonlyAttr}> %</div></td>
@@ -6506,7 +6510,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                 ${selectCell}
                 <td role="cell">${product.name}</td>
                 <td role="cell"><div><input type="text" class="description-input" data-field="description" value="${product.description}" aria-label="Description" title="Enter product description" ${readonlyAttr}></div></td>
-                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" ${isDeductiveQuote ? '' : 'min="0"'} value="${product.quantity}" aria-label="Quantity" title="Number of units" ${readonlyAttr}></div></td>
+                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" ${isDeductiveQuote ? '' : 'min="0"'} step="1" value="${product.quantity}" aria-label="Quantity" title="Number of units (whole numbers)" ${readonlyAttr}></div></td>
                 ${isDeductiveQuote ? `<td role="cell"><div>${product.originalQuantity || product.quantity}</div></td>` : ''}
                 <td role="cell"><div><input type="text" class="sell-input" data-field="sell" value="${formatNumber(product.sellPrice)}" aria-label="Sell" title="Unit selling price" ${readonlyAttr}></div></td>
                 <td role="cell"><div><input type="number" class="gpm-input" data-field="gpm" step="0.01" max="99.99" value="${formatGPM(gpm)}" aria-label="GPM" title="Gross Profit Margin percentage (0-99.99)" ${readonlyAttr}> %</div></td>
@@ -7698,15 +7702,32 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
         } else {
             const cost = product.costPrice;
             if (field == 'quantity') {
-                const quantity = isDeductiveQuote ? (parseFloat(input.value) || 0) : Math.max(0, parseFloat(input.value) || 0);
-                product.quantity = quantity;
+                if (effectiveProductTypeNum == 826080000 || effectiveProductTypeNum == 826080001) {
+                    const quantity = isDeductiveQuote ? (parseInt(input.value) || 0) : Math.max(0, parseInt(input.value) || 0);
+                    product.quantity = quantity;
+                } else {
+                    const quantity = isDeductiveQuote ? (parseFloat(input.value) || 0) : Math.max(0, parseFloat(input.value) || 0);
+                    product.quantity = quantity;
+                }
             } else if (field == 'sell') {
-                const sell = parseFloat(input.value.replace(/,/g, '')) || 0;
-                product.sellPrice = parseFloat(sell.toFixed(2));
+                const rawVal = parseFloat(input.value.replace(/,/g, '')) || 0;
+                if (effectiveProductTypeNum == 826080004) {
+                    // User entered Price Per Unit; reverse: sellPrice = pricePerUnit / multiplierNoQty
+                    const mNoQty = ((product.toTest || 100) / 100) * (product.annual || 1) * (product.time || 0);
+                    product.sellPrice = mNoQty > 0 ? parseFloat((rawVal / mNoQty).toFixed(2)) : 0;
+                } else {
+                    product.sellPrice = parseFloat(rawVal.toFixed(2));
+                }
                 changedGPM = true;
             } else if (field == 'cost') {
-                const newCost = parseFloat(input.value.replace(/,/g, '')) || 0;
-                product.costPrice = parseFloat(newCost.toFixed(2));
+                const rawCost = parseFloat(input.value.replace(/,/g, '')) || 0;
+                if (effectiveProductTypeNum == 826080004) {
+                    // User entered Cost Per Unit; reverse: costPrice = costPerUnit / multiplierNoQty
+                    const mNoQty = ((product.toTest || 100) / 100) * (product.annual || 1) * (product.time || 0);
+                    product.costPrice = mNoQty > 0 ? parseFloat((rawCost / mNoQty).toFixed(2)) : 0;
+                } else {
+                    product.costPrice = parseFloat(rawCost.toFixed(2));
+                }
                 changedGPM = true;
             } else if (field == 'gpm') {
                 let gpmVal = Math.min(99.99, parseFloat(input.value) || 0);
@@ -7779,7 +7800,12 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
             }
             const sellInput = row.querySelector('.sell-input');
             if (sellInput && sellInput !== input) {
-                sellInput.value = formatNumber(product.sellPrice);
+                if (effectiveProductTypeNum == 826080004) {
+                    const mNoQty = ((product.toTest || 100) / 100) * (product.annual || 1) * (product.time || 0);
+                    sellInput.value = formatNumber(mNoQty * product.sellPrice);
+                } else {
+                    sellInput.value = formatNumber(product.sellPrice);
+                }
             }
             const descInput = row.querySelector('.description-input');
             if (descInput && descInput !== input) {
@@ -7791,7 +7817,12 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
             }
             const costInput = row.querySelector('.cost-input');
             if (costInput && costInput !== input) {
-                costInput.value = formatNumber(product.costPrice);
+                if (effectiveProductTypeNum == 826080004) {
+                    const mNoQty = ((product.toTest || 100) / 100) * (product.annual || 1) * (product.time || 0);
+                    costInput.value = formatNumber(mNoQty * product.costPrice);
+                } else {
+                    costInput.value = formatNumber(product.costPrice);
+                }
             }
             const notesInput = row.querySelector('.notes-input');
             if (notesInput && notesInput !== input) {
