@@ -2430,6 +2430,8 @@
                             </div>
                             <div class="total-item">GPM: <span id="overall-gpm">0.00%</span><button id="edit-gpm-totals"
                                     class="edit-icon" aria-label="Edit GPM totals">✏️</button></div>
+                            <div class="total-item">Labor Hours: <span id="overall-labor-hours">0.00</span></div>
+                            <div class="total-item">Inspection Hours: <span id="overall-inspection-hours">0.00</span></div>
                         </div>
                     </div>
                 </div>
@@ -4269,7 +4271,8 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                 'imd_chargeableitemscost', 'imd_chargeableitemssell', 'imd_chargeableitemsgpm',
                 'imd_contractor_sell', 'imd_contractorcost', 'imd_contractorgpm',
                 'imd_othersell', 'imd_permitfees', 'imd_permitfeescost', 'imd_subscriptionamount',
-                'imd_esptotal', 'imd_alarmresponseservicestotal', 'imd_cloudservicestotal'
+                'imd_esptotal', 'imd_alarmresponseservicestotal', 'imd_cloudservicestotal',
+                'imd_inspectionhours'
             ];
             originalQuote = {};
             totalFields.forEach(field => {
@@ -6594,6 +6597,12 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                         };
                     }
                 });
+
+                // Per-group labor hours and inspection hours for the Summary tab
+                const groupLaborProducts = (selectedProductsMap[groupId] || {})['826080003'] || [];
+                const groupLaborHours = groupLaborProducts.reduce((sum, p) => sum + (p.quantity || 0), 0);
+                const groupTIProducts = (selectedProductsMap[groupId] || {})['826080004'] || [];
+                const groupInspectionHours = groupTIProducts.reduce((sum, p) => sum + ((p.time || 0) * (p.quantity || 0) / 60), 0);
                 
                 // Create group wrapper
                 const groupWrapper = document.createElement('div');
@@ -6613,6 +6622,8 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                                 <div class="total-item" style="margin: 0;">Cost: <span class="group-overall-cost" style="font-weight: 600;">$${formatNumber(groupOverallTotals.totalCost)}</span></div>
                                 <div class="total-item" style="margin: 0;">Sell: <span class="group-overall-sell" style="font-weight: 600;">$${formatNumber(groupOverallTotals.totalSell)}</span><button class="edit-icon group-edit-sell" data-groupid="${groupId}" aria-label="Edit overall sell total for ${groupName}">✏️</button></div>
                                 <div class="total-item" style="margin: 0;">GPM: <span class="group-overall-gpm" style="font-weight: 600;">${formatGPM(groupOverallTotals.gpm)}%</span><button class="edit-icon group-edit-gpm" data-groupid="${groupId}" aria-label="Edit overall GPM for ${groupName}">✏️</button></div>
+                                <div class="total-item" style="margin: 0;">Labor Hours: <span class="group-labor-hours" style="font-weight: 600;">${groupLaborHours.toFixed(2)}</span></div>
+                                <div class="total-item" style="margin: 0;">Inspection Hours: <span class="group-inspection-hours" style="font-weight: 600;">${groupInspectionHours.toFixed(2)}</span></div>
                             </div>
                         </div>
                     </div>
@@ -6666,11 +6677,18 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                         if (String(productType) === '826080002') {
                             totalsHtml = `<span class="summary-cat-subtotal" style="font-weight: 600;">Total Subscription: $${formatNumber(catTotals.totalSell)}</span>`;
                         } else {
+                            let extraMetric = '';
+                            if (String(productType) === '826080003') {
+                                extraMetric = `<span class="summary-cat-labor-hours">Total Qty (Hours): ${groupLaborHours.toFixed(2)}</span>`;
+                            } else if (String(productType) === '826080004') {
+                                extraMetric = `<span class="summary-cat-inspection-hours">Inspection Hours: ${groupInspectionHours.toFixed(2)}</span>`;
+                            }
                             totalsHtml = `
                                 <span style="display: inline-flex; gap: 12px; flex-wrap: wrap; font-weight: 600;">
                                     <span class="summary-cat-cost">Cost: $${formatNumber(catTotals.totalCost)}</span>
                                     <span class="summary-cat-sell">Sell: $${formatNumber(catTotals.totalSell)}</span>
                                     <span class="summary-cat-gpm">GPM: ${formatGPM(catTotals.gpm)}%</span>
+                                    ${extraMetric}
                                 </span>
                             `;
                         }
@@ -7826,6 +7844,17 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
             if (sellEl) sellEl.textContent = `$${formatNumber(overall.totalSell)}`;
             if (gpmEl) gpmEl.textContent = `${formatGPM(overall.gpm)}%`;
 
+            // Refresh per-group labor hours and inspection hours in the Summary phase header
+            const grpLaborProducts = (selectedProductsMap[groupId] || {})['826080003'] || [];
+            const grpLaborHrs = grpLaborProducts.reduce((s, p) => s + (p.quantity || 0), 0);
+            const lhEl = wrapper.querySelector('.group-labor-hours');
+            if (lhEl) lhEl.textContent = grpLaborHrs.toFixed(2);
+
+            const grpTIProducts = (selectedProductsMap[groupId] || {})['826080004'] || [];
+            const grpInspHrs = grpTIProducts.reduce((s, p) => s + ((p.time || 0) * (p.quantity || 0) / 60), 0);
+            const ihEl = wrapper.querySelector('.group-inspection-hours');
+            if (ihEl) ihEl.textContent = grpInspHrs.toFixed(2);
+
             // Update the category header totals for this productType
             const header = wrapper.querySelector(`.product-type-header[data-groupid="${groupId}"][data-producttype="${productType}"]`);
             if (!header) return;
@@ -7841,6 +7870,15 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                 if (cEl) cEl.textContent = `Cost: $${formatNumber(cat.totalCost)}`;
                 if (sEl) sEl.textContent = `Sell: $${formatNumber(cat.totalSell)}`;
                 if (gEl) gEl.textContent = `GPM: ${formatGPM(cat.gpm)}%`;
+
+                // Refresh labor hours / inspection hours on the category header
+                if (String(productType) === '826080003') {
+                    const catLhEl = header.querySelector('.summary-cat-labor-hours');
+                    if (catLhEl) catLhEl.textContent = `Total Qty (Hours): ${grpLaborHrs.toFixed(2)}`;
+                } else if (String(productType) === '826080004') {
+                    const catIhEl = header.querySelector('.summary-cat-inspection-hours');
+                    if (catIhEl) catIhEl.textContent = `Inspection Hours: ${grpInspHrs.toFixed(2)}`;
+                }
             }
         } catch (e) {
             console.warn('[SummaryInlineEdit] Totals UI update failed', e);
@@ -8018,7 +8056,25 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
         document.getElementById('overall-cost').textContent = `$${formatNumber(overallCost)}`;
         document.getElementById('overall-sell').textContent = `$${formatNumber(overallSell)}`;
         document.getElementById('overall-gpm').textContent = `${formatGPM(overallGpm)}%`;
-        
+
+        // Calculate Total Labor Hours (sum of quantity across all labor line items)
+        let totalLaborHours = 0;
+        Object.keys(selectedProductsMap).forEach(groupId => {
+            const laborProducts = (selectedProductsMap[groupId] || {})['826080003'] || [];
+            totalLaborHours += laborProducts.reduce((sum, p) => sum + (p.quantity || 0), 0);
+        });
+        document.getElementById('overall-labor-hours').textContent = totalLaborHours.toFixed(2);
+
+        // Calculate Total Inspection Hours: Sum of (time × quantity ÷ 60) for Test & Inspect items
+        let totalInspectionHours = 0;
+        Object.keys(selectedProductsMap).forEach(groupId => {
+            const tiProducts = (selectedProductsMap[groupId] || {})['826080004'] || [];
+            totalInspectionHours += tiProducts.reduce((sum, p) => {
+                return sum + ((p.time || 0) * (p.quantity || 0) / 60);
+            }, 0);
+        });
+        document.getElementById('overall-inspection-hours').textContent = totalInspectionHours.toFixed(2);
+
         // Update group-specific totals in the UI
         Object.keys(selectedProductsMap).forEach(groupId => {
             const groupCategoryTotals = calculateGroupTotals(groupId, activeProductType);
@@ -8717,6 +8773,11 @@ function showUpdateScreen(mode) {
             tab.setAttribute('aria-selected', 'true');
             tab.tabIndex = 0;
             activeProductType = tab.dataset.producttype;
+            // Clear search input when switching cart tabs
+            const searchInput = document.getElementById('search');
+            if (searchInput) {
+                searchInput.value = '';
+            }
             populateCart();
             updateTabCounts();
         });
@@ -9385,6 +9446,11 @@ function showUpdateScreen(mode) {
                 const laborProducts = (selectedProductsMap[groupId] || {})['826080003'] || [];
                 laborQuantitySum += laborProducts.reduce((sum, p) => sum + (p.quantity || 0), 0);
             });
+            let inspectionHoursSum = 0;
+            Object.keys(selectedProductsMap).forEach(groupId => {
+                const tiProducts = (selectedProductsMap[groupId] || {})['826080004'] || [];
+                inspectionHoursSum += tiProducts.reduce((sum, p) => sum + ((p.time || 0) * (p.quantity || 0) / 60), 0);
+            });
             // Chargeable items logic - sum across all phases/groups
             let chargeableOtherManualSell = 0;
             let chargeableOtherManualCost = 0;
@@ -9484,6 +9550,7 @@ function showUpdateScreen(mode) {
                 "imd_laborsell": laborSell,
                 "imd_labor_gpm": gpmForDataversePatch(laborGpm),
                 "imd_laborhours": laborQuantitySum,
+                "imd_inspectionhours": parseFloat(inspectionHoursSum.toFixed(2)),
                 "imd_testinspectcost": testCost,
                 "imd_testinspectsell": testSell,
                 "imd_testinspectgpm": gpmForDataversePatch(testGpm),
