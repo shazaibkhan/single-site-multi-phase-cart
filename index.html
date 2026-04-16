@@ -8134,6 +8134,124 @@ function showUpdateScreen(mode) {
         }
         populateCart();
     }
+
+    /**
+     * Returns the effective multiplier used to compute Extended Sell for a product.
+     * - Test & Inspect / Bundles: qty × (toTest% / 100) × annual × time
+     * - All other types: qty
+     */
+    function getExtSellMultiplier(product, productType) {
+        if (productType == 826080004 || productType == BUNDLE_TYPE) {
+            const percentToTest = (product.toTest || 100) / 100;
+            return product.quantity * percentToTest * (product.annual || 1) * (product.time || 0);
+        }
+        return product.quantity || 0;
+    }
+
+    /**
+     * Proportionally redistributes sell amounts across line items to match targetSell exactly.
+     *
+     * Proportional formula:
+     *   newUnitSell_i = oldUnitSell_i × (targetSell / oldTotalExtSell)
+     *   newExtSell_i  = newUnitSell_i × multiplier_i
+     *
+     * Rounding / remainder handling:
+     *   After rounding each Unit Sell to 2 decimal places, the sum of Extended Sell values
+     *   may drift from targetSell. A greedy penny-adjustment loop corrects this by nudging
+     *   individual Unit Sell values by $0.01, prioritising items whose multiplier is smallest
+     *   (finest granularity). The loop guarantees: Σ(ExtSell) === targetSell (within FP limits).
+     *
+     * Safeguards:
+     *   - Unit Sell is clamped to >= 0 (never negative).
+     *   - Zero-quantity / zero-multiplier items are skipped (no division by zero).
+     *   - If old total is ~0, the target is distributed evenly weighted by multiplier.
+     *   - A safety counter prevents runaway loops.
+     *
+     * @param {Array<{product: Object, productType: string}>} productsWithTypes
+     * @param {number} targetSell - The exact total Extended Sell desired.
+     * @returns {boolean} true if any product was adjusted.
+     */
+    function redistributeSellProportionally(productsWithTypes, targetSell) {
+        // --- Step 1: Collect adjustable items with multipliers ---
+        const items = [];
+        for (const { product: p, productType: t } of productsWithTypes) {
+            const multiplier = getExtSellMultiplier(p, t);
+            if (!multiplier) continue;
+            items.push({ product: p, multiplier, oldExtSell: p.sellPrice * multiplier });
+        }
+        if (items.length === 0) return false;
+
+        // --- Step 2: Handle target <= 0 edge cases ---
+        if (targetSell <= 0) {
+            for (const item of items) {
+                item.product.sellPrice = 0;
+                item.product.gpm = calculateGPM(0, item.product.costPrice);
+                item.product.isDirty = true;
+            }
+            return true;
+        }
+
+        const oldTotal = items.reduce((s, i) => s + i.oldExtSell, 0);
+
+        // --- Step 3: Proportional redistribution ---
+        if (Math.abs(oldTotal) > 0.001) {
+            const ratio = targetSell / oldTotal;
+            for (const item of items) {
+                item.newSellPrice = Math.max(0, Math.round(item.product.sellPrice * ratio * 100) / 100);
+            }
+        } else {
+            // Old total ≈ 0 → distribute target evenly, weighted by each item's multiplier share
+            const totalMult = items.reduce((s, i) => s + i.multiplier, 0);
+            for (const item of items) {
+                const shareExt = targetSell * (item.multiplier / totalMult);
+                item.newSellPrice = Math.max(0, Math.round((shareExt / item.multiplier) * 100) / 100);
+            }
+        }
+
+        // --- Step 4: Rounding remainder distribution ---
+        // Compute how far off the rounded result is from the target
+        let actualTotal = items.reduce((s, i) => s + i.newSellPrice * i.multiplier, 0);
+        actualTotal = Math.round(actualTotal * 100) / 100;
+        let remainder = Math.round((targetSell - actualTotal) * 100) / 100;
+
+        if (Math.abs(remainder) >= 0.005) {
+            // Sort by multiplier ascending → items with qty=1 give $0.01-level precision
+            const adjustable = [...items].sort((a, b) => a.multiplier - b.multiplier);
+            let safety = 0;
+
+            while (Math.abs(remainder) >= 0.005 && safety < 50000) {
+                safety++;
+                const step = remainder > 0 ? 0.01 : -0.01;
+                let bestIdx = -1;
+                let bestResidual = Math.abs(remainder);
+
+                for (let i = 0; i < adjustable.length; i++) {
+                    const candidate = Math.round((adjustable[i].newSellPrice + step) * 100) / 100;
+                    if (candidate < 0) continue;
+                    const extDelta = step * adjustable[i].multiplier;
+                    const newResidual = Math.abs(Math.round((remainder - extDelta) * 100) / 100);
+                    if (newResidual < bestResidual) {
+                        bestResidual = newResidual;
+                        bestIdx = i;
+                    }
+                }
+
+                if (bestIdx === -1) break; // no adjustment can improve the result
+                const chosen = adjustable[bestIdx];
+                chosen.newSellPrice = Math.round((chosen.newSellPrice + step) * 100) / 100;
+                remainder = Math.round((remainder - step * chosen.multiplier) * 100) / 100;
+            }
+        }
+
+        // --- Step 5: Apply the recalculated Unit Sell values ---
+        for (const item of items) {
+            item.product.sellPrice = item.newSellPrice;
+            item.product.gpm = calculateGPM(item.product.sellPrice, item.product.costPrice);
+            item.product.isDirty = true;
+        }
+        return true;
+    }
+
     function applyChanges() {
         const checkboxes = document.querySelectorAll('.options input[type="checkbox"]');
         const checkedTypes = Array.from(checkboxes).filter(cb => cb.checked).map(cb => catMap[cb.dataset.cat]);
@@ -8172,7 +8290,6 @@ function showUpdateScreen(mode) {
         if (updateMode == 'sell') {
             const newSellStr = document.getElementById('new-sell').value.replace(/,/g, '');
             const targetSell = parseFloat(newSellStr);
-            // Allow negative sell totals for deductive quotes; only forbid NaN
             if (isNaN(targetSell)) {
                 alert('Invalid Sell Total value.');
                 return;
@@ -8182,91 +8299,45 @@ function showUpdateScreen(mode) {
                 hideUpdateScreen();
                 return;
             }
+
             if (laborPctChange && hasLabor) {
+                // --- Labor % split: allocate a portion of delta to labor, the rest to other categories ---
                 const laborCat = cats[laborType] || { totalSell: 0 };
                 const laborProducts = productsByType[laborType] || [];
-                // Check if there are products, not just if total is non-zero
-                if (laborProducts.length > 0 && Math.abs(laborCat.totalSell) > 0.01) {
-                    const laborDelta = delta * laborPct;
-                    const laborRatio = 1 + laborDelta / laborCat.totalSell;
-                    laborProducts.forEach(p => {
-                        const qty = p.quantity || 0;
-                        // Skip rows with zero quantity to avoid NaN/Infinity
-                        if (!qty) {
-                            return;
-                        }
-                        const oldExt = p.sellPrice * qty;
-                        const newExt = oldExt * laborRatio;
-                        p.sellPrice = parseFloat(Math.max(0, newExt / qty).toFixed(2));
-                        p.gpm = calculateGPM(p.sellPrice, p.costPrice);
-                        p.isDirty = true;
-                    });
-                    adjusted = true;
-                }
-                const remainDelta = delta * (1 - laborPct);
                 const otherTypes = checkedTypes.filter(t => t !== laborType);
                 const otherTotalSell = otherTypes.reduce((sum, t) => sum + (cats[t]?.totalSell || 0), 0);
-                const otherHasProducts = otherTypes.some(t => (productsByType[t] || []).length > 0);
-                if (otherHasProducts && Math.abs(otherTotalSell) > 0.01 && Math.abs(remainDelta) > 0.01) {
-                    const otherRatio = 1 + remainDelta / otherTotalSell;
-                    otherTypes.forEach(t => {
-                        (productsByType[t] || []).forEach(p => {
-                            const qty = p.quantity || 0;
-                            if (!qty) {
-                                return;
-                            }
-                            const oldExt = p.sellPrice * qty;
-                            const newExt = oldExt * otherRatio;
-                            p.sellPrice = parseFloat(Math.max(0, newExt / qty).toFixed(2));
-                            p.gpm = calculateGPM(p.sellPrice, p.costPrice);
-                            p.isDirty = true;
-                        });
-                    });
-                    adjusted = true;
+
+                const laborDelta = delta * laborPct;
+                const remainDelta = delta - laborDelta;
+
+                if (laborProducts.length > 0) {
+                    const laborTarget = laborCat.totalSell + laborDelta;
+                    const laborItems = laborProducts.map(p => ({ product: p, productType: laborType }));
+                    if (redistributeSellProportionally(laborItems, laborTarget)) adjusted = true;
+                }
+
+                const otherItems = [];
+                otherTypes.forEach(t => {
+                    (productsByType[t] || []).forEach(p => otherItems.push({ product: p, productType: t }));
+                });
+                if (otherItems.length > 0) {
+                    const otherTarget = otherTotalSell + remainDelta;
+                    if (redistributeSellProportionally(otherItems, otherTarget)) adjusted = true;
                 }
             } else {
-                const checkedTotalSell = checkedTypes.reduce((sum, t) => sum + (cats[t]?.totalSell || 0), 0);
-                // Allow adjustment if there are products, even if total is zero (for deductive quotes)
-                if (hasProducts) {
-                    // If total is zero or very small, distribute the delta evenly across all products
-                    if (Math.abs(checkedTotalSell) > 0.01) {
-                        const checkedRatio = 1 + delta / checkedTotalSell;
-                        checkedTypes.forEach(t => {
-                            (productsByType[t] || []).forEach(p => {
-                                const qty = p.quantity || 0;
-                                if (!qty) {
-                                    return;
-                                }
-                                const oldExt = p.sellPrice * qty;
-                                const newExt = oldExt * checkedRatio;
-                                p.sellPrice = parseFloat(Math.max(0, newExt / qty).toFixed(2));
-                                p.gpm = calculateGPM(p.sellPrice, p.costPrice);
-                                p.isDirty = true;
-                            });
-                        });
-                    } else {
-                        // Total is zero or very small - distribute delta evenly across all products
-                        const totalProducts = checkedTypes.reduce((sum, t) => sum + (productsByType[t] || []).length, 0);
-                        if (totalProducts > 0) {
-                            const deltaPerProduct = delta / totalProducts;
-                            checkedTypes.forEach(t => {
-                                (productsByType[t] || []).forEach(p => {
-                                    const qty = p.quantity || 0;
-                                    if (!qty) {
-                                        return;
-                                    }
-                                    const oldExt = p.sellPrice * qty;
-                                    const newExt = oldExt + deltaPerProduct;
-                                    p.sellPrice = parseFloat(Math.max(0, newExt / qty).toFixed(2));
-                                    p.gpm = calculateGPM(p.sellPrice, p.costPrice);
-                                    p.isDirty = true;
-                                });
-                            });
-                        }
-                    }
+                // --- Standard path: redistribute across all checked categories proportionally ---
+                const allItems = [];
+                let checkedTotalSell = 0;
+                checkedTypes.forEach(t => {
+                    checkedTotalSell += (cats[t]?.totalSell || 0);
+                    (productsByType[t] || []).forEach(p => allItems.push({ product: p, productType: t }));
+                });
+                const checkedTarget = checkedTotalSell + delta;
+                if (allItems.length > 0 && redistributeSellProportionally(allItems, checkedTarget)) {
                     adjusted = true;
                 }
             }
+
             window.targetSellTotal = targetSell;
         } else {
             const newGpm = parseFloat(document.getElementById('new-gpm').value);
