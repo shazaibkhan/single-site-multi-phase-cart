@@ -6400,7 +6400,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                 ${selectCell}
                 <td role="cell">${product.name}</td>
                 <td role="cell"><div><input type="text" class="description-input" data-field="description" value="${product.description}" aria-label="Description" title="Enter product description" ${readonlyAttr}></div></td>
-                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" ${isDeductiveQuote ? '' : 'min="0"'} step="1" value="${product.quantity}" aria-label="Quantity" title="Number of subscription units (whole numbers)" ${readonlyAttr}></div></td>
+                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" ${isDeductiveQuote ? '' : 'min="0"'} step="1" value="${Math.round(product.quantity)}" aria-label="Quantity" title="Number of subscription units (whole numbers)" ${readonlyAttr}></div></td>
                 ${isDeductiveQuote ? `<td role="cell"><div>${(product.originalQuantity !== undefined && product.originalQuantity !== null) ? product.originalQuantity : product.quantity}</div></td>` : ''}
                 <td role="cell"><div><input type="text" class="total-subscription-input" data-field="totalSubscription" value="${formatNumber(product.totalSubscription)}" aria-label="Total Subscription" title="Total subscription amount" ${readonlyAttr}></div></td>
                 <td role="cell"><div class="total-monthly">$${totalMonthly}</div></td>
@@ -6439,7 +6439,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                 ${selectCell}
                 <td role="cell"><div><input type="text" class="name-input" data-field="name" value="${product.name}" aria-label="Name" title="Enter item name" ${readonlyAttr}></div></td>
                 <td role="cell"><div><input type="text" class="description-input" data-field="description" value="${product.description}" aria-label="Description" title="Enter item description" ${readonlyAttr}></div></td>
-                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" ${isDeductiveQuote ? '' : 'min="0"'} step="1" value="${product.quantity}" aria-label="Quantity" title="Number of units (whole numbers)" ${readonlyAttr}></div></td>
+                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" ${isDeductiveQuote ? 'max="0" ' : 'min="0" '} step="1" value="${Math.round(product.quantity)}" aria-label="Quantity" title="Number of units (whole numbers)" ${readonlyAttr}></div></td>
                 ${isDeductiveQuote ? `<td role="cell"><div>${(product.originalQuantity !== undefined && product.originalQuantity !== null) ? product.originalQuantity : product.quantity}</div></td>` : ''}
                 <td role="cell"><div><input type="text" class="sell-input" data-field="sell" value="${formatNumber(product.sellPrice)}" aria-label="Unit Sell" title="Unit selling price" ${readonlyAttr}></div></td>
                 <td role="cell"><div><input type="text" class="cost-input" data-field="cost" value="${formatNumber(product.costPrice)}" aria-label="Unit Cost" title="Unit cost price" ${readonlyAttr}></div></td>
@@ -6506,11 +6506,14 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
         } else {
             const selectCell = showSelect ? `<td role="cell"><input type="checkbox" aria-label="Select item" title="Select this item" ${disabledAttr}></td>` : '';
             const editCell = showEdit ? `<td role="cell"><button class="edit-mini" onclick="editProductInCart('${productType}', '${groupId}', ${idx})" aria-label="Edit ${product.name}">Edit</button></td>` : '';
+            const isEquipmentType = productType == 826080000 || productType === BUNDLE_TYPE;
+            const qtyDisplay = isEquipmentType ? Math.round(product.quantity) : product.quantity;
+            const qtyStep = isEquipmentType ? 'step="1"' : '';
             row.innerHTML = `
                 ${selectCell}
                 <td role="cell">${product.name}</td>
                 <td role="cell"><div><input type="text" class="description-input" data-field="description" value="${product.description}" aria-label="Description" title="Enter product description" ${readonlyAttr}></div></td>
-                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" ${isDeductiveQuote ? '' : 'min="0"'} step="1" value="${product.quantity}" aria-label="Quantity" title="Number of units (whole numbers)" ${readonlyAttr}></div></td>
+                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" ${isDeductiveQuote ? 'max="0" ' : 'min="0" '}${qtyStep} value="${qtyDisplay}" aria-label="Quantity" title="Number of units (whole numbers)" ${readonlyAttr}></div></td>
                 ${isDeductiveQuote ? `<td role="cell"><div>${product.originalQuantity || product.quantity}</div></td>` : ''}
                 <td role="cell"><div><input type="text" class="sell-input" data-field="sell" value="${formatNumber(product.sellPrice)}" aria-label="Sell" title="Unit selling price" ${readonlyAttr}></div></td>
                 <td role="cell"><div><input type="number" class="gpm-input" data-field="gpm" step="0.01" max="99.99" value="${formatGPM(gpm)}" aria-label="GPM" title="Gross Profit Margin percentage (0-99.99)" ${readonlyAttr}> %</div></td>
@@ -7500,7 +7503,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                                 <td role="cell"><input type="checkbox" aria-label="Select subscription item" title="Select this subscription item"></td>
                                 <td role="cell">${product.name}</td>
                                 <td role="cell"><div><input type="text" class="description-input" data-field="description" value="${product.description}" aria-label="Description" title="Enter product description"></div></td>
-                                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" min="0" value="${product.quantity}" aria-label="Quantity" title="Number of subscription units"></div></td>
+                                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" min="0" step="1" value="${Math.round(product.quantity)}" aria-label="Quantity" title="Number of subscription units (whole numbers)"></div></td>
                                 <td role="cell"><div><input type="text" class="total-subscription-input" data-field="totalSubscription" value="${formatNumber(product.totalSubscription)}" aria-label="Total Subscription" title="Total subscription amount"></div></td>
                                 <td role="cell"><div class="total-monthly">$${totalMonthly}</div></td>
                                 <td role="cell"><div><input type="number" class="term-input" data-field="term" value="${product.term}" aria-label="Term" title="Subscription term in months"></div></td>
@@ -7527,7 +7530,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                                 <td role="cell"><input type="checkbox" aria-label="Select chargeable item" title="Select this chargeable item"></td>
                                 <td role="cell"><div><input type="text" class="name-input" data-field="name" value="${product.name}" aria-label="Name" title="Enter item name"></div></td>
                                 <td role="cell"><div><input type="text" class="description-input" data-field="description" value="${product.description}" aria-label="Description" title="Enter item description"></div></td>
-                                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" min="0" value="${product.quantity}" aria-label="Quantity" title="Number of units"></div></td>
+                                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" min="0" step="1" value="${Math.round(product.quantity)}" aria-label="Quantity" title="Number of units (whole numbers)"></div></td>
                                 <td role="cell"><div><input type="text" class="sell-input" data-field="sell" value="${formatNumber(product.sellPrice)}" aria-label="Unit Sell" title="Unit selling price"></div></td>
                                 <td role="cell"><div><input type="text" class="cost-input" data-field="cost" value="${formatNumber(product.costPrice)}" aria-label="Unit Cost" title="Unit cost price"></div></td>
                                 <td role="cell"><div class="ext-sell">$${extSell}</div></td>
@@ -7557,6 +7560,9 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                 setTooltip(row.querySelector('.ext-cost'), `$${extCost}`);
             } else if (activeProductType == 826080004) {
                 const isTaxable = product.msdyn_taxable == true;
+                const tiM = ((product.toTest || 100) / 100) * (product.annual || 1) * (product.time || 0);
+                const pricePerUnitList = formatNumber(tiM * product.sellPrice);
+                const costPerUnitList = formatNumber(tiM * product.costPrice);
                 row.innerHTML = `
                                 <td role="cell"><input type="checkbox" aria-label="Select test item" title="Select this test item"></td>
                                 <td role="cell">${product.name}</td>
@@ -7565,8 +7571,8 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                                 <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" min="0" value="${product.quantity}" aria-label="Quantity" title="Number of items to test"></div></td>
                                 <td role="cell"><div><input type="number" class="annual-input" data-field="annual" min="0" value="${product.annual || 1}" aria-label="Annual" title="Annual frequency (e.g., 1 for yearly)"></div></td>
                                 <td role="cell"><div><input type="number" class="totest-input" data-field="totest" min="0" max="100" value="${product.toTest || 100}" aria-label="% to Test" title="Percentage of items to test (0-100)"></div></td>
-                                <td role="cell"><div><input type="text" class="sell-input" data-field="sell" value="${formatNumber(product.sellPrice)}" aria-label="Unit Sell" title="Unit selling price for testing"></div></td>
-                                <td role="cell"><div><input type="text" class="cost-input" data-field="cost" value="${formatNumber(product.costPrice)}" aria-label="Unit Cost" title="Unit cost for testing"></div></td>
+                                <td role="cell"><div><input type="text" class="sell-input" data-field="sell" value="${pricePerUnitList}" aria-label="Price Per Unit" title="Price Per Unit (Ext Sell ÷ Quantity)"></div></td>
+                                <td role="cell"><div><input type="text" class="cost-input" data-field="cost" value="${costPerUnitList}" aria-label="Cost Per Unit" title="Cost Per Unit (Ext Cost ÷ Quantity)"></div></td>
                                 <td role="cell"><div class="ext-sell">$${extSell}</div></td>
                                 <td role="cell"><div class="ext-cost">$${extCost}</div></td>
                                 <td role="cell"><div><input type="number" class="gpm-input" data-field="gpm" step="0.01" max="99.99" value="${formatGPM(gpm)}" aria-label="GPM" title="Gross Profit Margin percentage (0-99.99)"> %</div></td>
@@ -7576,11 +7582,14 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                 setTooltip(row.querySelector('.ext-cost'), `$${extCost}`);
                 setTooltip(row.querySelector('.ext-sell'), `$${extSell}`);
             } else {
+                const isEquipmentList = activeProductType == 826080000 || activeProductType === BUNDLE_TYPE;
+                const qtyListDisplay = isEquipmentList ? Math.round(product.quantity) : product.quantity;
+                const qtyListStep = isEquipmentList ? 'step="1"' : '';
                 row.innerHTML = `
                                 <td role="cell"><input type="checkbox" aria-label="Select item" title="Select this item"></td>
                                 <td role="cell">${product.name}</td>
                                 <td role="cell"><div><input type="text" class="description-input" data-field="description" value="${product.description}" aria-label="Description" title="Enter product description"></div></td>
-                                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" min="0" value="${product.quantity}" aria-label="Quantity" title="Number of units"></div></td>
+                                <td role="cell"><div><input type="number" class="qty-input" data-field="quantity" min="0" ${qtyListStep} value="${qtyListDisplay}" aria-label="Quantity" title="Number of units (whole numbers for equipment)"></div></td>
                                 <td role="cell"><div><input type="text" class="sell-input" data-field="sell" value="${formatNumber(product.sellPrice)}" aria-label="Sell" title="Unit selling price"></div></td>
                                 <td role="cell"><div><input type="number" class="gpm-input" data-field="gpm" step="0.01" max="99.99" value="${formatGPM(gpm)}" aria-label="GPM" title="Gross Profit Margin percentage (0-99.99)"> %</div></td>
                                 <td role="cell"><div><input type="text" class="cost-input" data-field="cost" value="${formatNumber(product.costPrice)}" aria-label="Cost" title="Unit cost price"></div></td>
@@ -7644,7 +7653,11 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                 product.termTotal = product.totalMonthly * product.term;
                 product.rar = product.totalMonthly * 12;
             } else if (field == 'quantity') {
-                product.quantity = isDeductiveQuote ? (parseInt(input.value) || 0) : Math.max(1, parseInt(input.value) || 1);
+                const parsedQty = parseFloat(input.value);
+                const qVal = isNaN(parsedQty) ? 0 : parsedQty;
+                const qty = isDeductiveQuote ? Math.round(qVal) : Math.max(1, Math.round(qVal) || 1);
+                product.quantity = qty;
+                input.value = qty;
                 product.totalMonthly = product.totalSubscription * product.quantity;
                 product.termTotal = product.totalMonthly * product.term;
                 product.rar = product.totalMonthly * 12;
@@ -7702,13 +7715,19 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
         } else {
             const cost = product.costPrice;
             if (field == 'quantity') {
-                if (effectiveProductTypeNum == 826080000 || effectiveProductTypeNum == 826080001) {
-                    const quantity = isDeductiveQuote ? (parseInt(input.value) || 0) : Math.max(0, parseInt(input.value) || 0);
-                    product.quantity = quantity;
-                } else {
-                    const quantity = isDeductiveQuote ? (parseFloat(input.value) || 0) : Math.max(0, parseFloat(input.value) || 0);
-                    product.quantity = quantity;
+                const effType = effectiveProductType;
+                const isChargeableItem = effType == 826080001 || effType == '826080001';
+                const isEquipment = effType == 826080000 || effType == '826080000' || effType === BUNDLE_TYPE;
+                const parsedQty = parseFloat(input.value);
+                const quantityVal = isNaN(parsedQty) ? 0 : parsedQty;
+                let quantity = isChargeableItem
+                    ? quantityVal
+                    : (isDeductiveQuote ? quantityVal : Math.max(0, quantityVal));
+                if (isEquipment || isChargeableItem) {
+                    quantity = Math.round(quantity);
+                    input.value = quantity;
                 }
+                product.quantity = quantity;
             } else if (field == 'sell') {
                 const rawVal = parseFloat(input.value.replace(/,/g, '')) || 0;
                 if (effectiveProductTypeNum == 826080004) {
@@ -9344,8 +9363,9 @@ function showUpdateScreen(mode) {
                 if (productType == 826080001 || productType == 826080003 || productType == 826080004) {
                     quoteDetail["msdyn_taxable"] = product.msdyn_taxable;
                 }
-                // Hardcode priceperunit to 0 if not taxable for specific types, but keep frontend display unchanged
-                if ((productType === 826080001 || productType === 826080003 || productType === 826080004) && product.msdyn_taxable === false) {
+                // Hardcode priceperunit to 0 if not taxable for specific types, but keep frontend display unchanged.
+                // Use !== true so null/undefined from Dataverse (Taxable = No) matches, not only strict boolean false.
+                if ((productType === 826080001 || productType === 826080003 || productType === 826080004) && product.msdyn_taxable !== true) {
                     quoteDetail["priceperunit"] = 0;
                 } else {
                     quoteDetail["priceperunit"] = product.sellPrice;
