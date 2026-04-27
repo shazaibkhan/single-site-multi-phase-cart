@@ -2565,6 +2565,28 @@
     let testInspectParents = []; // Store parent products for Test and Inspect
     let chargeableParents = []; // Store parent products for Chargeable Item
     window.targetSellTotal = null;
+    window._suppressDirtyChangesFlag = false;
+    function setDirtyChangesFlag(isDirty) {
+        try {
+            sessionStorage.setItem('dirtyChanges', isDirty ? 'true' : 'false');
+        } catch (e) {
+            // sessionStorage may be unavailable in some embed contexts
+        }
+    }
+    /** Line-item count across all phases (same shape as Finish allSelectedProducts build). */
+    function getTotalSelectedProductCountFromMap() {
+        let n = 0;
+        try {
+            Object.keys(selectedProductsMap || {}).forEach(groupId => {
+                const gm = selectedProductsMap[groupId];
+                if (!gm) return;
+                Object.values(gm).forEach(products => {
+                    if (Array.isArray(products)) n += products.length;
+                });
+            });
+        } catch (e) { /* ignore */ }
+        return n;
+    }
     let isDeductiveQuote = false; // Track if quote is Deductive change order type
     /** GUID from env var imd_writeinproduct — placeholder product for manual chargeable lines; excluded from picker lists */
     let writeInProductGuid = null;
@@ -5123,6 +5145,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
             
             // Mark products as loaded to prevent reloading when switching groups
             productsLoaded = true;
+            setDirtyChangesFlag(false);
             
             showListScreen();
         } catch (error) {
@@ -5998,6 +6021,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
             selectedProducts = selectedProductsMap[selectedGroupId];
             row.classList.remove('selected');
         }
+        setDirtyChangesFlag(true);
         updateTabCounts();
         populateSelectedSummary();
     }
@@ -6058,6 +6082,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                 }
             }
         }
+        setDirtyChangesFlag(true);
         checkedCheckboxes.forEach(cb => cb.checked = false);
         document.querySelectorAll('#equipment-table tr').forEach(row => row.classList.remove('selected'));
         updateAddBundleButton();
@@ -6096,6 +6121,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
             quoteGroupId: selectedQuoteGroupId // Track the quote group ID for proper association
         };
         selectedProducts['826080001'].push(newProduct);
+        setDirtyChangesFlag(true);
         populateCart();
     }
     function applyFilters() {
@@ -7640,6 +7666,9 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
         
         let changedGPM = false;
         product.isDirty = true;
+        if (!window._suppressDirtyChangesFlag) {
+            setDirtyChangesFlag(true);
+        }
         
         // Preserve cursor position for the active input
         const activeInput = document.activeElement;
@@ -8076,6 +8105,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                     }
                 }
                 
+                setDirtyChangesFlag(true);
                 updateTabCounts();
                 populateCart();
                 populateSelectedSummary();
@@ -8495,6 +8525,7 @@ function showUpdateScreen(mode) {
             }
         }
         if (adjusted) {
+            setDirtyChangesFlag(true);
             populateCart();
         } else {
             alert('No categories selected with totals to adjust.');
@@ -8664,6 +8695,7 @@ function showUpdateScreen(mode) {
             button.disabled = false;
         }
         
+        setDirtyChangesFlag(true);
         updateTabCounts();
         populateCart();
         populateSelectedSummary();
@@ -8847,6 +8879,53 @@ function showUpdateScreen(mode) {
         });
     });
     // Event Listeners
+    // Parent screen click guard: warn if Quote Builder has unsaved changes (same as quotehtmlcompoennt.html).
+    (function attachParentDirtyGuardOnce() {
+        try {
+            const parentDoc = window.parent && window.parent.document;
+            if (!parentDoc) return;
+            if (parentDoc._quoteBuilderDirtyGuardAttached) return;
+            parentDoc._quoteBuilderDirtyGuardAttached = true;
+
+            const iframeEl = parentDoc.querySelector('iframe');
+            parentDoc.addEventListener('click', function (event) {
+                const isDirty = sessionStorage.getItem('dirtyChanges') === 'true';
+                if (!isDirty) return;
+                if (iframeEl && iframeEl.contains(event.target)) return;
+
+                // No line items: do not block the parent UI, confirm, progress, or Finish (stale dirty only).
+                if (getTotalSelectedProductCountFromMap() === 0) {
+                    setDirtyChangesFlag(false);
+                    alert('No product selected.');
+                    return;
+                }
+
+                event.preventDefault();
+                event.stopPropagation();
+                if (typeof event.stopImmediatePropagation === 'function') {
+                    event.stopImmediatePropagation();
+                }
+
+                const save = window.parent.confirm('You have unsaved changes. Do you want to save it?');
+                if (save) {
+                    window._suppressDirtyChangesFlag = true;
+                    setDirtyChangesFlag(false);
+                    try {
+                        if (window.parent && window.parent.Xrm && window.parent.Xrm.Utility && typeof window.parent.Xrm.Utility.showProgressIndicator === 'function') {
+                            window.parent.Xrm.Utility.showProgressIndicator('Quote saving in progress...');
+                        }
+                    } catch (e) {
+                        // ignore
+                    }
+                    const finishBtn = document.getElementById('finish');
+                    if (finishBtn) finishBtn.click();
+                }
+            }, true);
+        } catch (e) {
+            // Ignore if parent access is restricted/unavailable
+        }
+    })();
+
     document.getElementById('group-dropdown').addEventListener('change', async function() {
         if (this.value) {
             await continueToProducts();
@@ -9010,6 +9089,10 @@ function showUpdateScreen(mode) {
 
             // Guard against repeated clicks triggering duplicate saves/updates
             if (isFinishing) {
+                return;
+            }
+            if (getTotalSelectedProductCountFromMap() === 0) {
+                alert('No product selected.');
                 return;
             }
             isFinishing = true;
@@ -9214,7 +9297,7 @@ function showUpdateScreen(mode) {
         }
         
         if (allSelectedProducts.length == 0) {
-            alert("No products selected.");
+            alert('No product selected.');
             return;
         }
         
@@ -9631,11 +9714,20 @@ function showUpdateScreen(mode) {
             if (needsQuoteUpdate) {
                 await window.parent.Xrm.WebApi.updateRecord("quote", currentRecordId, quoteUpdate);
             }
+            setDirtyChangesFlag(false);
             refreshParentFormAfterFinish();
         } catch (error) {
             console.error("Error saving quote details:", error);
             alert("Error saving quote details: " + error.message);
         } finally {
+            try {
+                if (window.parent && window.parent.Xrm && window.parent.Xrm.Utility && typeof window.parent.Xrm.Utility.closeProgressIndicator === 'function') {
+                    window.parent.Xrm.Utility.closeProgressIndicator();
+                }
+            } catch (e) {
+                // ignore
+            }
+            window._suppressDirtyChangesFlag = false;
             button.textContent = originalText;
             button.disabled = false;
             isFinishing = false;
