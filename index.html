@@ -11,6 +11,28 @@
             box-sizing: border-box;
         }
 
+        .drag-handle {
+            display: inline-block;
+            margin-right: 8px;
+            cursor: grab;
+            user-select: none;
+            color: #64748b;
+            font-size: 16px;
+            line-height: 1;
+            vertical-align: middle;
+        }
+        tr.dragging {
+            opacity: 0.6;
+        }
+        tr.drop-before {
+            outline: 2px solid #3b82f6;
+            outline-offset: -2px;
+        }
+        tr.drop-after {
+            outline: 2px dashed #3b82f6;
+            outline-offset: -2px;
+        }
+
         #equipment-table.equipment-tab th:nth-child(2),
         #equipment-table.equipment-tab td:nth-child(2) {
             min-width: 320px!important;
@@ -2587,6 +2609,77 @@
         } catch (e) { /* ignore */ }
         return n;
     }
+    /** Stable row id for cart / drag-drop (matches quotehtmlcompoennt.html). */
+    function getCartRowKey(product) {
+        return String(product.quotedetailid || product.writeInId || product.productId || '');
+    }
+    function getNextDisplayOrder(groupId, type) {
+        const key = String(type);
+        const list = (selectedProductsMap[groupId] && selectedProductsMap[groupId][key]) || [];
+        let max = 0;
+        list.forEach(p => {
+            const d = parseInt(p.displayOrder, 10);
+            if (!isNaN(d)) max = Math.max(max, d);
+        });
+        return max + 1;
+    }
+    function ensureDisplayOrderAndSort(groupId, type) {
+        const key = String(type);
+        if (key === 'bundles') return;
+        const list = selectedProductsMap[groupId]?.[key];
+        if (!Array.isArray(list) || list.length === 0) return;
+        let next = getNextDisplayOrder(groupId, key);
+        list.forEach(p => {
+            const d = parseInt(p.displayOrder, 10);
+            if (p.displayOrder == null || isNaN(d)) {
+                p.displayOrder = next++;
+            } else {
+                p.displayOrder = d;
+            }
+        });
+        list.sort((a, b) => {
+            const cmp = (a.displayOrder || 0) - (b.displayOrder || 0);
+            if (cmp !== 0) return cmp;
+            if (key === '826080001') {
+                const nameA = a.name || '';
+                const nameB = b.name || '';
+                if (nameA === '' && nameB !== '') return 1;
+                if (nameA !== '' && nameB === '') return -1;
+            }
+            return (a.name || '').localeCompare(b.name || '');
+        });
+    }
+    function resequenceDisplayOrder(groupId, type) {
+        const key = String(type);
+        const list = selectedProductsMap[groupId]?.[key];
+        if (!Array.isArray(list)) return;
+        list.forEach((p, i) => {
+            p.displayOrder = i + 1;
+            p.isDirty = true;
+        });
+        setDirtyChangesFlag(true);
+    }
+    function moveItemByRowKey(groupId, type, draggedKey, targetKey, insertAfter) {
+        const key = String(type);
+        const list = selectedProductsMap[groupId]?.[key];
+        if (!Array.isArray(list) || list.length === 0) return false;
+        const fromIdx = list.findIndex(p => getCartRowKey(p) === draggedKey);
+        if (fromIdx === -1) return false;
+        const [item] = list.splice(fromIdx, 1);
+        if (!targetKey) {
+            list.push(item);
+        } else {
+            let toIdx = list.findIndex(p => getCartRowKey(p) === targetKey);
+            if (toIdx === -1) {
+                list.push(item);
+            } else {
+                if (insertAfter) toIdx += 1;
+                list.splice(toIdx, 0, item);
+            }
+        }
+        resequenceDisplayOrder(groupId, key);
+        return true;
+    }
     let isDeductiveQuote = false; // Track if quote is Deductive change order type
     /** GUID from env var imd_writeinproduct — placeholder product for manual chargeable lines; excluded from picker lists */
     let writeInProductGuid = null;
@@ -4803,6 +4896,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                                     <attribute name="imd_termtotal"/>
                                     <attribute name="imd_rar"/>
                                     <attribute name="imd_originalquantity"/>
+                                    <attribute name="imd_displayorder"/>
                                     <attribute name="imd_quotegroup"/>
                                     <order attribute="sequencenumber" descending="true"/>
                                     <filter type="and">
@@ -5011,6 +5105,10 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                     const ispriceoverridden = entity.ispriceoverridden;
                     const chargeableItemType = entity['product.imd_chargeableitemtype'] || null;
                     const statecode = entity['product.statecode'] !== undefined ? entity['product.statecode'] : (productData?.productid?.statecode !== undefined ? productData.productid.statecode : 0);
+                    const displayOrderRaw = entity.imd_displayorder;
+                    const displayOrder = displayOrderRaw !== null && displayOrderRaw !== undefined && displayOrderRaw !== ''
+                        ? parseInt(displayOrderRaw, 10)
+                        : null;
                     let targetType = productType;
                     if (productData && productData.productid.isBundle) {
                         targetType = BUNDLE_TYPE;
@@ -5045,7 +5143,8 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                         isPriceOverridden: ispriceoverridden,
                         groupId: groupId, // Track which group this product belongs to
                         quoteGroupId: quoteGroupId, // Track the quote group ID
-                        statecode: statecode // Product status: 0=Active, 1=Retired, 2=Draft, 3=Under Revision
+                        statecode: statecode, // Product status: 0=Active, 1=Retired, 2=Draft, 3=Under Revision
+                        displayOrder: displayOrder
                     };
                     newProduct.isDirty = false;
                     newProduct.original = {
@@ -5105,13 +5204,11 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                     return `${gId}: ${total} products`;
                 }));
                 
-                // Sort products for each group
+                // Order by imd_displayorder (same as quotehtmlcompoennt.html)
                 Object.keys(selectedProductsMap).forEach(groupId => {
                     Object.keys(selectedProductsMap[groupId]).forEach(type => {
-                        if (selectedProductsMap[groupId][type].length > 0) {
-                            selectedProductsMap[groupId][type].sort((a, b) => a.name.localeCompare(b.name || ''));
-                    }
-                });
+                        ensureDisplayOrderAndSort(groupId, type);
+                    });
                 });
                 
                 // If we have a selected group, load its products into selectedProducts
@@ -5969,7 +6066,8 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                         subscriptionType: productData?.productid.imd_subscriptiontype || null,
                         isDirty: true,
                         groupId: selectedGroupId, // Track which group this product belongs to
-                        statecode: statecode // Product status: 0=Active, 1=Retired, 2=Draft, 3=Under Revision
+                        statecode: statecode, // Product status: 0=Active, 1=Retired, 2=Draft, 3=Under Revision
+                        displayOrder: getNextDisplayOrder(selectedGroupId, activeProductType)
                     };
                 } else {
                     newProduct = {
@@ -5991,7 +6089,8 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                         isPriceOverridden: true,
                         isDirty: true,
                         groupId: selectedGroupId, // Track which group this product belongs to
-                        statecode: statecode // Product status: 0=Active, 1=Retired, 2=Draft, 3=Under Revision
+                        statecode: statecode, // Product status: 0=Active, 1=Retired, 2=Draft, 3=Under Revision
+                        displayOrder: getNextDisplayOrder(selectedGroupId, activeProductType)
                     };
                     if (activeProductType == 826080004) {
                         newProduct.time = time;
@@ -6068,7 +6167,9 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                         productType: childType,
                         isPriceOverridden: true,
                         isDirty: true,
-                        statecode: childStatecode // Product status: 0=Active, 1=Retired, 2=Draft, 3=Under Revision
+                        statecode: childStatecode, // Product status: 0=Active, 1=Retired, 2=Draft, 3=Under Revision
+                        groupId: selectedGroupId,
+                        displayOrder: getNextDisplayOrder(selectedGroupId, childType)
                     };
                     if (childType === 826080004) {
                         newChild.time = childProd.productid.imd_time || 0;
@@ -6118,7 +6219,8 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
             quotedetailid: null,
             statecode: 0, // Manual write-in items default to Active
             groupId: selectedGroupId, // Track which group/phase this product belongs to
-            quoteGroupId: selectedQuoteGroupId // Track the quote group ID for proper association
+            quoteGroupId: selectedQuoteGroupId, // Track the quote group ID for proper association
+            displayOrder: getNextDisplayOrder(selectedGroupId, '826080001')
         };
         selectedProducts['826080001'].push(newProduct);
         setDirtyChangesFlag(true);
@@ -6407,6 +6509,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
         row.dataset.producttype = productType;
         // Store unique product identifier for reliable removal
         row.dataset.productid = product.quotedetailid || product.writeInId || product.productId || '';
+        row.dataset.rowkey = getCartRowKey(product);
         
         if (productType == 826080004) {
             const percentToTest = (product.toTest || 100) / 100;
@@ -6420,7 +6523,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                 const selected = product.billingFrequency == key ? 'selected' : '';
                 billingFreqOptionsHtml += `<option value="${key}" ${selected}>${text}</option>`;
             });
-            const selectCell = showSelect ? `<td role="cell"><input type="checkbox" aria-label="Select subscription item" title="Select this subscription item" ${disabledAttr}></td>` : '';
+            const selectCell = showSelect ? `<td role="cell"><span class="drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag to reorder">☰</span><input type="checkbox" aria-label="Select subscription item" title="Select this subscription item" ${disabledAttr}></td>` : '';
             const editCell = showEdit ? `<td role="cell"><button class="edit-mini" onclick="editProductInCart('${productType}', '${groupId}', ${idx})" aria-label="Edit ${product.name}">Edit</button></td>` : '';
             row.innerHTML = `
                 ${selectCell}
@@ -6453,7 +6556,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
             const deleteButton = (!isReadonly && product.isWriteIn && !product.quotedetailid)
                 ? `<button class="delete-row-btn" data-writeinid="${product.writeInId}" style="background: none; border: none; font-size: 20px; cursor: pointer; color: #dc2626; margin-right: 5px;" aria-label="Remove this row" title="Remove this manual chargeable item">−</button>`
                 : '';
-            const selectCell = showSelect ? `<td role="cell"><input type="checkbox" aria-label="Select chargeable item" title="Select this chargeable item" ${disabledAttr}></td>` : '';
+            const selectCell = showSelect ? `<td role="cell"><span class="drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag to reorder">☰</span><input type="checkbox" aria-label="Select chargeable item" title="Select this chargeable item" ${disabledAttr}></td>` : '';
             // Keep columns aligned: Chargeable items always have a trailing "action" column when add-row is enabled
             const actionCellContent = showEdit
                 ? `<button class="edit-mini" onclick="editProductInCart('${productType}', '${groupId}', ${idx})" aria-label="Edit ${product.name}">Edit</button>`
@@ -6481,7 +6584,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
             setTooltip(row.querySelector('.ext-sell'), `$${extSell}`);
         } else if (productType == 826080003) {
             const isTaxable = product.msdyn_taxable == true;
-            const selectCell = showSelect ? `<td role="cell"><input type="checkbox" aria-label="Select labor item" title="Select this labor item" ${disabledAttr}></td>` : '';
+            const selectCell = showSelect ? `<td role="cell"><span class="drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag to reorder">☰</span><input type="checkbox" aria-label="Select labor item" title="Select this labor item" ${disabledAttr}></td>` : '';
             const editCell = showEdit ? `<td role="cell"><button class="edit-mini" onclick="editProductInCart('${productType}', '${groupId}', ${idx})" aria-label="Edit ${product.name}">Edit</button></td>` : '';
             row.innerHTML = `
                 ${selectCell}
@@ -6506,7 +6609,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
             const tiMultiplierNoQty = ((product.toTest || 100) / 100) * (product.annual || 1) * (product.time || 0);
             const pricePerUnit = tiMultiplierNoQty * product.sellPrice;
             const costPerUnit = tiMultiplierNoQty * product.costPrice;
-            const selectCell = showSelect ? `<td role="cell"><input type="checkbox" aria-label="Select test item" title="Select this test item" ${disabledAttr}></td>` : '';
+            const selectCell = showSelect ? `<td role="cell"><span class="drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag to reorder">☰</span><input type="checkbox" aria-label="Select test item" title="Select this test item" ${disabledAttr}></td>` : '';
             const editCell = showEdit ? `<td role="cell"><button class="edit-mini" onclick="editProductInCart('${productType}', '${groupId}', ${idx})" aria-label="Edit ${product.name}">Edit</button></td>` : '';
             row.innerHTML = `
                 ${selectCell}
@@ -6530,7 +6633,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
             setTooltip(row.querySelector('.ext-cost'), `$${extCost}`);
             setTooltip(row.querySelector('.ext-sell'), `$${extSell}`);
         } else {
-            const selectCell = showSelect ? `<td role="cell"><input type="checkbox" aria-label="Select item" title="Select this item" ${disabledAttr}></td>` : '';
+            const selectCell = showSelect ? `<td role="cell"><span class="drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag to reorder">☰</span><input type="checkbox" aria-label="Select item" title="Select this item" ${disabledAttr}></td>` : '';
             const editCell = showEdit ? `<td role="cell"><button class="edit-mini" onclick="editProductInCart('${productType}', '${groupId}', ${idx})" aria-label="Edit ${product.name}">Edit</button></td>` : '';
             const isEquipmentType = productType == 826080000 || productType === BUNDLE_TYPE;
             const qtyDisplay = isEquipmentType ? Math.round(product.quantity) : product.quantity;
@@ -6757,19 +6860,8 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                     tbody.dataset.groupid = groupId;
                     tbody.dataset.producttype = productType;
                     
-                    // Sort products
-                    let sortedProducts = [...typeProducts];
-                    if (productType === '826080001') {
-                        sortedProducts.sort((a, b) => {
-                            const nameA = a.name || '';
-                            const nameB = b.name || '';
-                            if (nameA === '' && nameB !== '') return 1;
-                            if (nameA !== '' && nameB === '') return -1;
-                            return nameA.localeCompare(nameB);
-                        });
-                    } else {
-                        sortedProducts.sort((a, b) => a.name.localeCompare(b.name || ''));
-                    }
+                    ensureDisplayOrderAndSort(groupId, productType);
+                    const sortedProducts = selectedProductsMap[groupId][productType] || [];
                     
                     // Render products for this type (inline-edit enabled in Summary tab, with checkboxes for selection)
                     sortedProducts.forEach((product, productIdx) => {
@@ -6983,6 +7075,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                 
                 const tbody = document.createElement('tbody');
                 tbody.dataset.groupid = group.imd_groupid;
+                tbody.dataset.producttype = '826080001';
                 // Empty tbody - no rows yet, but headers are visible
                 groupTable.appendChild(tbody);
                 
@@ -7057,19 +7150,9 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
             const groupOverallTotals = calculateGroupOverallTotals(groupId);
             const categoryName = productTypeNames[activeProductType] || 'Category';
             
-            // Custom sort for Chargeable Items: unnamed (blank) rows go to the bottom
+            // Order rows by imd_displayorder (per group / product type)
+            ensureDisplayOrderAndSort(groupId, activeProductType);
             let sortedProducts = [...products];
-            if (activeProductType === '826080001') {
-                sortedProducts.sort((a, b) => {
-                    const nameA = a.name || '';
-                    const nameB = b.name || '';
-                    if (nameA === '' && nameB !== '') return 1;
-                    if (nameA !== '' && nameB === '') return -1;
-                    return nameA.localeCompare(nameB);
-                });
-            } else {
-                sortedProducts.sort((a, b) => a.name.localeCompare(b.name || ''));
-            }
             
             // Create group table wrapper
             const groupWrapper = document.createElement('div');
@@ -7323,6 +7406,7 @@ async function getBundles(departmentId, typeOfSale, shouldFilter) {
                 
                 const tbody = document.createElement('tbody');
                 tbody.dataset.groupid = group.imd_groupid;
+                tbody.dataset.producttype = '826080001';
                 // Empty tbody - no rows yet, but headers are visible
                 groupTable.appendChild(tbody);
                 
@@ -8678,6 +8762,7 @@ function showUpdateScreen(mode) {
                 selectedProductsMap[groupId][productType] = groupProducts.filter(p => 
                     !productIdsToRemove.has(p.quotedetailid || p.writeInId || p.productId)
                 );
+                resequenceDisplayOrder(groupId, productType);
                 
                 const afterCount = selectedProductsMap[groupId][productType].length;
                 console.log('[RemoveSelected] Removed from state', { groupId, productType, beforeCount, afterCount, removed: beforeCount - afterCount });
@@ -8924,6 +9009,89 @@ function showUpdateScreen(mode) {
         } catch (e) {
             // Ignore if parent access is restricted/unavailable
         }
+    })();
+
+    // Drag & drop reordering (native HTML5 DnD) for group cart tables — same scope as quotehtmlcompoennt.html (groupId + product type).
+    (function attachDisplayOrderDnDOnce() {
+        if (window._displayOrderDnDAttached) return;
+        window._displayOrderDnDAttached = true;
+        const state = { key: null, type: null, groupId: null };
+
+        const clearDropMarks = (scopeEl) => {
+            const root = scopeEl || document;
+            root.querySelectorAll('tr.drop-before, tr.drop-after').forEach(r => {
+                r.classList.remove('drop-before', 'drop-after');
+            });
+        };
+
+        document.addEventListener('dragstart', (e) => {
+            const handle = e.target && e.target.closest ? e.target.closest('.drag-handle') : null;
+            if (!handle) return;
+            const row = handle.closest('tr');
+            if (!row) return;
+            const type = row.dataset.producttype;
+            const groupId = row.dataset.groupid;
+            const key = row.dataset.rowkey;
+            if (!type || !groupId || !key) return;
+
+            state.key = key;
+            state.type = String(type);
+            state.groupId = String(groupId);
+            row.classList.add('dragging');
+            try {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', key);
+            } catch (err) {
+                // ignore
+            }
+        });
+
+        document.addEventListener('dragend', (e) => {
+            const row = e.target && e.target.closest ? e.target.closest('tr') : null;
+            if (row) row.classList.remove('dragging');
+            clearDropMarks();
+            state.key = null;
+            state.type = null;
+            state.groupId = null;
+        });
+
+        document.addEventListener('dragover', (e) => {
+            if (!state.key || !state.type || !state.groupId) return;
+            const row = e.target && e.target.closest ? e.target.closest('tr') : null;
+            if (!row) return;
+            if (String(row.dataset.producttype) !== String(state.type)) return;
+            if (String(row.dataset.groupid) !== String(state.groupId)) return;
+
+            e.preventDefault();
+            clearDropMarks(row.closest('table') || row.parentElement);
+            const rect = row.getBoundingClientRect();
+            const before = e.clientY < rect.top + rect.height / 2;
+            row.classList.add(before ? 'drop-before' : 'drop-after');
+        });
+
+        document.addEventListener('drop', (e) => {
+            if (!state.key || !state.type || !state.groupId) return;
+            const row = e.target && e.target.closest ? e.target.closest('tr') : null;
+            const tbody = e.target && e.target.closest ? e.target.closest('tbody') : null;
+            if (!tbody) return;
+
+            e.preventDefault();
+
+            let targetKey = null;
+            let insertAfter = false;
+            if (row && String(row.dataset.producttype) === String(state.type) && String(row.dataset.groupid) === String(state.groupId)) {
+                targetKey = row.dataset.rowkey || null;
+                insertAfter = row.classList.contains('drop-after');
+            }
+
+            const moved = moveItemByRowKey(String(state.groupId), String(state.type), state.key, targetKey, insertAfter);
+            clearDropMarks(row ? (row.closest('table') || tbody) : tbody);
+
+            if (moved) {
+                populateCart();
+                populateSelectedSummary();
+            }
+        });
     })();
 
     document.getElementById('group-dropdown').addEventListener('change', async function() {
@@ -9425,6 +9593,7 @@ function showUpdateScreen(mode) {
                     "imd_extsell": extSell,
                     "imd_gpm": gpm,
                     "imd_producttype": productType,
+                    "imd_displayorder": product.displayOrder != null ? parseInt(product.displayOrder, 10) : null,
                     "ispriceoverridden": true
                 };
                 if (product.productType == 826080002) {
